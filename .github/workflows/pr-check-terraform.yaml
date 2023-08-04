@@ -11,13 +11,13 @@ jobs:
       - name: pr-check
         run: |
           docker run --rm -v $(pwd):/src -w /src -e SKIP_CHECKOV -e GITHUB_TOKEN mcr.microsoft.com/azterraform:latest make pr-check
-      - name: Breaking Change Brief
-        run: |
-          c=$(docker run --rm -t -v $(pwd):/src -w /src mcr.microsoft.com/azterraform:latest breaking_detect /src ${{ github.repository_owner }} ${{ github.event.repository.name }} ${{ github.base_ref }})
-          if [ ! -z "$c" ]; then
-            msg=$(printf "Potential Breaking Changes in ${{ github.event.pull_request.head.sha }}:\n${c}")
-            jq -n --arg msg "$msg" '{pr: ${{ github.event.pull_request.number }}, body: $msg}' > change
-          fi
+      # - name: Breaking Change Brief
+      #   run: |
+      #     c=$(docker run --rm -t -v $(pwd):/src -w /src mcr.microsoft.com/azterraform:latest breaking_detect /src ${{ github.repository_owner }} ${{ github.event.repository.name }} ${{ github.base_ref }})
+      #     if [ ! -z "$c" ]; then
+      #       msg=$(printf "Potential Breaking Changes in ${{ github.event.pull_request.head.sha }}:\n${c}")
+      #       jq -n --arg msg "$msg" '{pr: ${{ github.event.pull_request.number }}, body: $msg}' > change
+      #     fi
       - name: Check change existence
         id: check_change
         uses: andstor/file-existence-action@v1
