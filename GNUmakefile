@@ -59,10 +59,7 @@ version-upgrade-test:
 terrafmt:
 	@sh "$(CURDIR)/scripts/terrafmt.sh"
 
-pre-commit: tffmt terrafmt depsensure fmt fumpt generate
-
-depsensure:
-	@sh "$(CURDIR)/scripts/deps-ensure.sh"
+pre-commit: tffmt terrafmt generate
 
 depscheck:
 	@sh "$(CURDIR)/scripts/deps-check.sh"
