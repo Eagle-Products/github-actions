@@ -8,6 +8,8 @@ env:
 
 jobs:
   prepr-check:
+    runs-on: ubuntu-latest
+    
     strategy:
       matrix:
         node-version: [20.x]
