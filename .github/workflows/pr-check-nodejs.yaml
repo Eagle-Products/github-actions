@@ -1,0 +1,82 @@
+name: Pre Pull Request Check Nodejs
+on:
+  workflow_call:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  prepr-check:
+    strategy:
+      matrix:
+        node-version: [20.x]
+        # See supported Node.js release schedule at https://nodejs.org/en/about/releases/
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ matrix.node-version }}
+      - name: yarn Install
+        run: |
+          yarn install
+      - name: Run tests
+        if: always()
+        run: |
+          yarn test:cov
+      - name: Coveralls
+        uses: romeovs/lcov-reporter-action@v0.2.21
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          lcov-file: ./apps/service/coverage/lcov.info
+
+      - name: Check is template repo
+        id: check_template_repo
+        uses: andstor/file-existence-action@v1
+        with:
+          files: ".template_repo"
+
+      - uses: actions/setup-node@v3
+        with:
+          registry-url: 'https://npm.pkg.github.com'
+          # Defaults to the user or organization that owns the workflow file
+          scope: '@eglcon'
+      - name: Configure git user
+        run: |
+          git config --global user.name "${{ github.actor }}"
+          git config --global user.email "${{ github.actor }}@users.noreply.github.com"
+      # Publish to GitHub Packages
+      - name: Publish to GitHub Packages - PR
+        if: steps.check_template_repo.outputs.files_exists == 'false' && github.event_name == 'pull_request'
+        run: yarn release --canary --preid pr${{ github.event.number }}bld${{ github.run_number }} --yes
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish to GitHub Packages - Release
+        if: steps.check_template_repo.outputs.files_exists == 'false' && github.event_name != 'pull_request'
+        run: yarn release --yes
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # run: yarn release --create-release github --yes
+          
+      - name: Log in to the Container registry
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: ${{ steps.check_template_repo.outputs.files_exists == 'false' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
