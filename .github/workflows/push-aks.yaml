@@ -1,0 +1,10 @@
+name: Push To AKS
+on:
+  workflow_call:
+
+jobs:
+  push-aks:
+    runs-on: ubuntu-latest
+    steps:
+        - uses: 8BitJonny/gh-get-current-pr@2.1.0
+          id: PR
