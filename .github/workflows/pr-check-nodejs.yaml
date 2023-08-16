@@ -101,4 +101,5 @@ jobs:
     if: github.ref == 'refs/heads/master'
     needs: [ prepr-check ]
     uses: Eagle-Products/github-actions/.github/workflows/push-aks.yaml@dev
+    secrets: inherit
     
