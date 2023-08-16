@@ -69,6 +69,12 @@ jobs:
         name: Checkout
         uses: actions/checkout@v3
 
+      - name: Check is template repo
+        id: check_template_repo
+        uses: andstor/file-existence-action@v1
+        with:
+          files: ".template_repo"
+
       - name: Extract metadata (tags, labels) for Docker
         id: meta
         uses: docker/metadata-action@v4
@@ -97,3 +103,5 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
