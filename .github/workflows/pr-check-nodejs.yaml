@@ -95,3 +95,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      
+      - name: Deploy to AKS
+        if: github.ref == 'refs/heads/master'
+        uses: ./.github/workflows/push-aks.yaml
