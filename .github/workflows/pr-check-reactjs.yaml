@@ -64,20 +64,7 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         # run: yarn release --create-release github --yes
-
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      -
-        name: Checkout
-        uses: actions/checkout@v3
-
-      - name: Check is template repo
-        id: check_template_repo
-        uses: andstor/file-existence-action@v1
-        with:
-          files: ".template_repo"
-
+  
       - name: Extract metadata (tags, labels) for Docker
         id: meta
         uses: docker/metadata-action@v4
