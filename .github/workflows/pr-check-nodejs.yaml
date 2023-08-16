@@ -101,5 +101,9 @@ jobs:
     if: github.ref == 'refs/heads/master'
     needs: [ prepr-check ]
     uses: Eagle-Products/github-actions/.github/workflows/push-aks.yaml@dev
-    secrets: inherit
+    secrets:
+      AZURE_CREDENTIALS: "${{ secrets.AZURE_CREDENTIALS }}"
+      resource_group: "${{ secrets.resource_group }}"
+      cluster_name: "${{ secrets.cluster_name }}"
+      name_space: "${{ secrets.name_space }}"
     
