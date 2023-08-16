@@ -98,4 +98,4 @@ jobs:
       
       - name: Deploy to AKS
         if: github.ref == 'refs/heads/master'
-        uses: ./.github/workflows/push-aks.yaml
+        uses: Eagle-Products/github-actions/.github/workflows/push-aks.yaml@dev
