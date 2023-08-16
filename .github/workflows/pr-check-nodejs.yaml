@@ -68,6 +68,9 @@ jobs:
         uses: docker/metadata-action@v4
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            # set latest tag for default branch
+            type=raw,value=latest,enable={{is_default_branch}}
 
       -
         name: Set up QEMU
@@ -88,7 +91,6 @@ jobs:
         with:
           context: .
           push: ${{ steps.check_template_repo.outputs.files_exists == 'false' }}
-          platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
