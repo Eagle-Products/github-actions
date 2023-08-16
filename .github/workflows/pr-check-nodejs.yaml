@@ -1,7 +1,16 @@
 name: Pre Pull Request Check Nodejs
 on:
   workflow_call:
-
+    secrets:
+      AZURE_CREDENTIALS:
+        required: true
+      resource_group:
+          required: true
+      cluster_name:
+          required: true
+      name_space:
+          required: true
+          
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
