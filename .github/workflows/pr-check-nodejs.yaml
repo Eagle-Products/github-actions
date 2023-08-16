@@ -96,6 +96,9 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
       
-      - name: Deploy to AKS
-        if: github.ref == 'refs/heads/master'
-        uses: Eagle-Products/github-actions/.github/workflows/push-aks.yaml@dev
+  deploy:
+    name: Deploy
+    if: github.ref == 'refs/heads/master'
+    needs: [ prepr-check ]
+    uses: Eagle-Products/github-actions/.github/workflows/push-aks.yaml@dev
+    
