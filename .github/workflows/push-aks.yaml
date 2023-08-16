@@ -1,10 +1,41 @@
 name: Push To AKS
 on:
   workflow_call:
+    secrets:
+        AZURE_CREDENTIALS:
+          required: true
+        resource_group:
+            required: true
+        cluster_name:
+            required: true
+        name_space:
+            required: true
 
 jobs:
   push-aks:
     runs-on: ubuntu-latest
     steps:
-        - uses: 8BitJonny/gh-get-current-pr@2.1.0
-          id: PR
+        - uses: azure/login@v1.4.3
+          name: Azure login
+          id: login
+          with:
+            creds: ${{ secrets.AZURE_CREDENTIALS }}
+        - name: Set AKS context
+          id: set-context
+          uses: azure/aks-set-context@v3
+          with:
+            resource-group: '${{ secrets.resource_group }}' 
+            cluster-name: '${{ secrets.cluster_name }}'
+        - name: Setup kubectl
+          id: install-kubectl
+          uses: azure/setup-kubectl@v3
+        - name: Checkout source code
+          uses: actions/checkout@v3
+        - name: Deploy to AKS
+          id: deploy-aks
+          uses: Azure/k8s-deploy@v4
+          with:
+            namespace: '${{ secrets.name_space }}'
+            manifests: |
+                k8s
+            
