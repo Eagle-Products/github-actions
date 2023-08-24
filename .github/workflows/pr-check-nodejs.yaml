@@ -71,15 +71,66 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         # run: yarn release --create-release github --yes
           
+  docker-build:
+    name: Docker Build
+    needs: [ prepr-check ]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Check is template repo
+        id: check_template_repo
+        uses: andstor/file-existence-action@v1
+        with:
+          files: ".template_repo"
 
       - name: Extract metadata (tags, labels) for Docker
         id: meta
         uses: docker/metadata-action@v4
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=schedule
+            type=ref,event=branch
+            type=ref,event=tag
+            type=ref,event=pr
+            type=raw,value=latest,enable={{is_default_branch}}
+
           # tags: |
           #   # set latest tag for default branch
           #   type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Get all tags
+        id: all-tags
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const path = "/repos/" + "${{ github.repository }}" + "/tags"
+            const parameters = "{'" + "${{ github.repository_owner }}" + "', '" + "${{ github.repository }}" + "'}"
+            return github.rest.git.getTag(path,parameters)
+      
+      # Prepare JSON output for Unix command line
+      # https://github.com/mad9000/actions-find-and-replace-string
+      - name: Format jq result
+        id: formatted-jq
+        uses: mad9000/actions-find-and-replace-string@2
+        with:
+          source: ${{ steps.all-tags.outputs.result }}
+          find: "'"
+          replace: "\\'"
+
+      # Parse Github API output and search for tags only matching the current commit SHA 
+      - name: Search all tags for commit
+        id: tag-results
+        run: echo ::set-output name=tags::"$( echo '${{ steps.formatted-jq.outputs.value }}' | jq -r ".data | .[] | select( .commit.sha == \"${{ github.sha }}\" ) | .name" )"
+      
+      # Merge the tag lists from docker/metadata-action and GitHub API
+      - name: Build tag list
+        id: tag-list
+        run: |
+          echo ::set-output name=tags::"$(
+            echo -n "${{ steps.meta.outputs.tags }}" | tr '\n' ','
+            for r in `echo "${{ steps.tag-results.outputs.tags }}" | tr '\n' ' '`; do echo -n ,${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$r | tr '[:upper:]' '[:lower:]'; done
+          )"
 
       -
         name: Set up QEMU
@@ -100,7 +151,7 @@ jobs:
         with:
           context: .
           push: ${{ steps.check_template_repo.outputs.files_exists == 'false' }}
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: ${{ steps.tag-list.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -108,7 +159,7 @@ jobs:
   deploy:
     name: Deploy
     if: github.ref == 'refs/heads/master'
-    needs: [ prepr-check ]
+    needs: [ docker-build ]
     uses: Eagle-Products/github-actions/.github/workflows/push-aks.yaml@dev
     secrets:
       AZURE_CREDENTIALS: "${{ secrets.AZURE_CREDENTIALS }}"
