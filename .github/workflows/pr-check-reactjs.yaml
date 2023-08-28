@@ -47,7 +47,7 @@ jobs:
         with:
           registry-url: 'https://npm.pkg.github.com'
           # Defaults to the user or organization that owns the workflow file
-          scope: '@eglcon'
+          # scope: '@eglcon'
       - name: Configure git user
         run: |
           git config --global user.name "${{ github.actor }}"
