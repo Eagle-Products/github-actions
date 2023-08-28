@@ -99,39 +99,6 @@ jobs:
           #   # set latest tag for default branch
           #   type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Get all tags
-        id: all-tags
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const path = "/repos/" + "${{ github.repository }}" + "/tags"
-            const parameters = "{'" + "${{ github.repository_owner }}" + "', '" + "${{ github.repository }}" + "'}"
-            return github.rest.git.getTag(path,parameters)
-      
-      # Prepare JSON output for Unix command line
-      # https://github.com/mad9000/actions-find-and-replace-string
-      - name: Format jq result
-        id: formatted-jq
-        uses: mad9000/actions-find-and-replace-string@2
-        with:
-          source: ${{ steps.all-tags.outputs.result }}
-          find: "'"
-          replace: "\\'"
-
-      # Parse Github API output and search for tags only matching the current commit SHA 
-      - name: Search all tags for commit
-        id: tag-results
-        run: echo ::set-output name=tags::"$( echo '${{ steps.formatted-jq.outputs.value }}' | jq -r ".data | .[] | select( .commit.sha == \"${{ github.sha }}\" ) | .name" )"
-      
-      # Merge the tag lists from docker/metadata-action and GitHub API
-      - name: Build tag list
-        id: tag-list
-        run: |
-          echo ::set-output name=tags::"$(
-            echo -n "${{ steps.meta.outputs.tags }}" | tr '\n' ','
-            for r in `echo "${{ steps.tag-results.outputs.tags }}" | tr '\n' ' '`; do echo -n ,${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$r | tr '[:upper:]' '[:lower:]'; done
-          )"
-
       -
         name: Set up QEMU
         uses: docker/setup-qemu-action@v2
@@ -151,7 +118,7 @@ jobs:
         with:
           context: .
           push: ${{ steps.check_template_repo.outputs.files_exists == 'false' }}
-          tags: ${{ steps.tag-list.outputs.tags }}
+          tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
