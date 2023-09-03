@@ -28,6 +28,8 @@ jobs:
       - name: yarn Install
         run: |
           yarn install
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Run tests
         if: always()
         run: |
