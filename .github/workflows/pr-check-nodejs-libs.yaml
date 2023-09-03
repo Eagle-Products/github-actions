@@ -1,7 +1,10 @@
 name: Pre Pull Request Check Nodejs Libs
 on:
   workflow_call:
-          
+    inputs:
+      org_name:
+        required: true
+        type: string
 jobs:
   prepr-check:
     runs-on: ubuntu-latest
@@ -43,7 +46,7 @@ jobs:
         with:
           registry-url: 'https://npm.pkg.github.com'
           # Defaults to the user or organization that owns the workflow file
-          scope: '@alpha-prep'
+          scope: '@${{ inputs.org_name }}'
       - name: Configure git user
         run: |
           git config --global user.name "${{ github.actor }}"
