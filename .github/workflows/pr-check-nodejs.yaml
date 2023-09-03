@@ -71,12 +71,12 @@ jobs:
         if: steps.check_template_repo.outputs.files_exists == 'false' && github.event_name == 'pull_request'
         run: yarn release --canary --preid pr${{ github.event.number }}bld${{ github.run_number }} --yes
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
       - name: Publish to GitHub Packages - Release
         if: steps.check_template_repo.outputs.files_exists == 'false' && github.event_name != 'pull_request'
         run: yarn release --yes
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
         # run: yarn release --create-release github --yes
           
   docker-build:
