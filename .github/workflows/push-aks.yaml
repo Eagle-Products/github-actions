@@ -3,7 +3,7 @@ on:
   workflow_call:
     inputs:
       VERSION_NUMBER:
-        required: true
+        default: master
         type: string
     secrets:
         AZURE_CREDENTIALS:
