@@ -35,10 +35,18 @@ jobs:
           uses: azure/setup-kubectl@v3
         - name: Checkout source code
           uses: actions/checkout@v3
-        - name: Render Deployment YAML
+
+        - name: Render Deployment YAML TMP
           uses: nowactions/envsubst@v1
           with:
             input: ./k8s/app-deployment.yaml
+            output: ./app-deployment.yaml.tmp
+          env:
+            VERSION_NUMBER: ${{ inputs.VERSION_NUMBER }}
+        - name: Render Deployment YAML
+          uses: nowactions/envsubst@v1
+          with:
+            input: ./app-deployment.yaml.tmp
             output: ./k8s/app-deployment.yaml
           env:
             VERSION_NUMBER: ${{ inputs.VERSION_NUMBER }}
