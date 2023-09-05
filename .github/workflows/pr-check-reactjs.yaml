@@ -5,6 +5,9 @@ on:
       org_name:
         required: true
         type: string
+      VERSION_NUMBER:
+        required: true
+        type: string
     secrets:
       NODE_AUTH_TOKEN:
         required: true
@@ -92,6 +95,7 @@ jobs:
             type=ref,event=tag
             type=ref,event=pr
             type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ inputs.VERSION_NUMBER }} ,enable={{is_default_branch}}
 
           # tags: |
           #   # set latest tag for default branch

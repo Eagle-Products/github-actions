@@ -1,6 +1,10 @@
 name: Push To AKS
 on:
   workflow_call:
+    inputs:
+      VERSION_NUMBER:
+        required: true
+        type: string
     secrets:
         AZURE_CREDENTIALS:
           required: true
@@ -38,4 +42,5 @@ jobs:
             namespace: '${{ secrets.name_space }}'
             manifests: |
                 k8s
-            
+          env:
+            VERSION_NUMBER: ${{ inputs.VERSION_NUMBER }}
