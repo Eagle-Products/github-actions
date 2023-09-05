@@ -2,6 +2,9 @@ name: Pre Pull Request Check Nodejs
 on:
   workflow_call:
     inputs:
+      VERSION_NUMBER:
+        default: master
+        type: string
       org_name:
         required: true
         type: string
@@ -101,7 +104,7 @@ jobs:
             type=ref,event=branch
             type=ref,event=tag
             type=ref,event=pr
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ inputs.VERSION_NUMBER }} ,enable={{is_default_branch}}
 
           # tags: |
           #   # set latest tag for default branch
@@ -121,6 +124,21 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Render Deployment YAML TMP
+        uses: nowactions/envsubst@v1
+        with:
+          input: ./k8s/app-deployment.yaml
+          output: ./app-deployment.yaml.tmp
+        env:
+          VERSION_NUMBER: ${{ inputs.VERSION_NUMBER }}
+      - name: Render Deployment YAML
+        uses: nowactions/envsubst@v1
+        with:
+          input: ./app-deployment.yaml.tmp
+          output: ./k8s/app-deployment.yaml
+        env:
+          VERSION_NUMBER: ${{ inputs.VERSION_NUMBER }}
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v4
         with:
@@ -132,4 +150,6 @@ jobs:
           cache-to: type=gha,mode=max
           secrets: |
             "NODE_AUTH_TOKEN=${{ secrets.NODE_AUTH_TOKEN }}"
+        env:
+          VERSION_NUMBER: ${{ inputs.VERSION_NUMBER }}
     
