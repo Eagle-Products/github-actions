@@ -6,7 +6,7 @@ on:
         required: true
         type: string
       VERSION_NUMBER:
-        required: true
+        default: master
         type: string
     secrets:
       NODE_AUTH_TOKEN:
@@ -94,7 +94,6 @@ jobs:
             type=ref,event=branch
             type=ref,event=tag
             type=ref,event=pr
-            type=raw,value=latest,enable={{is_default_branch}}
             type=raw,value=${{ inputs.VERSION_NUMBER }} ,enable={{is_default_branch}}
 
           # tags: |
