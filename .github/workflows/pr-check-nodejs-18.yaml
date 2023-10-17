@@ -53,6 +53,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           lcov-file: ./coverage/lcov.info
+          filter-changed-files: true
 
       - name: Check is template repo
         id: check_template_repo
