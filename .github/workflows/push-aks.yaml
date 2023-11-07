@@ -41,7 +41,7 @@ jobs:
       - name: Render Deployment YAML TMP
         uses: nowactions/envsubst@v1
         with:
-          input: ${{ secrets.deployment_location }}
+          input: ./k8s/app-deployment.yaml
           output: ./app-deployment.yaml.tmp
         env:
           VERSION_NUMBER: ${{ inputs.VERSION_NUMBER }}
@@ -49,7 +49,7 @@ jobs:
         uses: nowactions/envsubst@v1
         with:
           input: ./app-deployment.yaml.tmp
-          output: ${{ secrets.deployment_location }}
+          output: ./k8s/app-deployment.yaml
         env:
           VERSION_NUMBER: ${{ inputs.VERSION_NUMBER }}
       - name: Deploy to AKS
