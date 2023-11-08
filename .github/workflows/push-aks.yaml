@@ -15,7 +15,7 @@ on:
       name_space:
         required: true
       deployment_location:
-        required: true
+        required: false
 
 jobs:
   push-aks:
