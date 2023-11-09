@@ -15,7 +15,7 @@ on:
       name_space:
         required: true
       deployment_location:
-        required: true
+        required: false
 
 jobs:
   push-aks:
@@ -41,7 +41,7 @@ jobs:
       - name: Render Deployment YAML TMP
         uses: nowactions/envsubst@v1
         with:
-          input: '${{ secrets.deployment_location }}'
+          input: ./k8s-prod/app-deployment.yaml
           output: ./app-deployment.yaml.tmp
         env:
           VERSION_NUMBER: ${{ inputs.VERSION_NUMBER }}
@@ -49,7 +49,7 @@ jobs:
         uses: nowactions/envsubst@v1
         with:
           input: ./app-deployment.yaml.tmp
-          output: '${{ secrets.deployment_location }}'
+          output: ./k8s-prod/app-deployment.yaml
         env:
           VERSION_NUMBER: ${{ inputs.VERSION_NUMBER }}
       - name: Deploy to AKS
@@ -58,6 +58,6 @@ jobs:
         with:
           namespace: '${{ secrets.name_space }}'
           manifests: |
-            k8s
+            k8s-prod
         env:
           VERSION_NUMBER: ${{ inputs.VERSION_NUMBER }}
