@@ -58,6 +58,6 @@ jobs:
         with:
           namespace: '${{ secrets.name_space }}'
           manifests: |
-            k8s-prod
+            k8s-prod/*.yaml
         env:
           VERSION_NUMBER: ${{ inputs.VERSION_NUMBER }}
