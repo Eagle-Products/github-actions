@@ -1,0 +1,71 @@
+name: Push to EKS
+
+on:
+  workflow_call:
+    inputs:
+      VERSION_NUMBER:
+        default: master
+        type: string
+    secrets:
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+      AWS_REGION:
+        required: true
+      CLUSTER_NAME:
+        required: true
+      NAME_SPACE:
+        required: true
+
+jobs:
+  push-eks:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Configure AWS Credentials
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      # Step 2: Set up kubectl
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: latest
+
+      # Step 3: Update kubeconfig for AWS EKS
+      - name: Update kubeconfig for EKS
+        run: |
+          aws eks update-kubeconfig --region ${{ secrets.AWS_REGION }} --name ${{ secrets.CLUSTER_NAME }}
+
+      # Step 4: Checkout Source Code
+      - name: Checkout Source Code
+        uses: actions/checkout@v3
+
+      # Step 5: Render Deployment YAML TMP
+      - name: Render Deployment YAML TMP
+        uses: nowactions/envsubst@v1
+        with:
+          input: ./k8s/deployment.yaml
+          output: ./deployment.yaml.tmp
+        env:
+          VERSION_NUMBER: ${{ inputs.VERSION_NUMBER }}
+
+      # Step 6: Render Deployment YAML
+      - name: Render Deployment YAML
+        uses: nowactions/envsubst@v1
+        with:
+          input: ./deployment.yaml.tmp
+          output: ./k8s/deployment.yaml
+        env:
+          VERSION_NUMBER: ${{ inputs.VERSION_NUMBER }}
+
+      # Step 7: Deploy to EKS
+      - name: Deploy to EKS
+        run: |
+          kubectl apply -f ./k8s/
+          kubectl rollout status deployment/app-financial -n ${{ secrets.NAME_SPACE }}
