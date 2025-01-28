@@ -41,26 +41,22 @@ jobs:
       - name: Update kubeconfig for EKS
         run: |
           aws eks update-kubeconfig --region ${{ secrets.AWS_REGION }} --name ${{ secrets.CLUSTER_NAME }}
+          kubectl get nodes
 
       # Step 4: Checkout Source Code
       - name: Checkout Source Code
         uses: actions/checkout@v3
 
-      # Step 5: Render Deployment YAML TMP
-      - name: Render Deployment YAML TMP
-        uses: nowactions/envsubst@v1
-        with:
-          input: ./k8s/deployment.yaml
-          output: ./deployment.yaml.tmp
-        env:
-          VERSION_NUMBER: ${{ inputs.VERSION_NUMBER }}
+      # Step 5: Verify files in k8s directory (Optional)
+      - name: Verify files in k8s directory
+        run: ls -la ./k8s
 
       # Step 6: Render Deployment YAML
       - name: Render Deployment YAML
         uses: nowactions/envsubst@v1
         with:
-          input: ./deployment.yaml.tmp
-          output: ./k8s/deployment.yaml
+          input: ./k8s/app-deployment.yaml
+          output: ./k8s/app-deployment.yaml
         env:
           VERSION_NUMBER: ${{ inputs.VERSION_NUMBER }}
 
