@@ -41,7 +41,6 @@ jobs:
       - name: Update kubeconfig for EKS
         run: |
           aws eks update-kubeconfig --region ${{ secrets.AWS_REGION }} --name ${{ secrets.CLUSTER_NAME }}
-          kubectl get nodes
 
       # Step 4: Checkout Source Code
       - name: Checkout Source Code
