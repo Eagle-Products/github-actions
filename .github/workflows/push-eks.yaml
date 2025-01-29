@@ -31,6 +31,9 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
+      - name: Verify AWS Identity
+        run: aws sts get-caller-identity
+
       # Step 2: Set up kubectl
       - name: Setup kubectl
         uses: azure/setup-kubectl@v3
@@ -41,6 +44,9 @@ jobs:
       - name: Update kubeconfig for EKS
         run: |
           aws eks update-kubeconfig --region ${{ secrets.AWS_REGION }} --name ${{ secrets.CLUSTER_NAME }}
+
+      - name: Verify Cluster Access
+        run: kubectl get nodes
 
       # Step 4: Checkout Source Code
       - name: Checkout Source Code
