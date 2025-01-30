@@ -78,7 +78,7 @@ jobs:
       - name: Deploy to EKS
         id: deploy-eks
         run: |
-          chmod +x ./deploy.sh  # Ensure the deploy.sh script is executable
-          ./deploy.sh           # Call your deploy script
+          chmod +x ./k8s/deploy.sh  # Ensure the deploy.sh script is executable
+          ./k8s/deploy.sh           # Call your deploy script
         env:
           VERSION_NUMBER: ${{ inputs.VERSION_NUMBER }}
