@@ -78,7 +78,7 @@ jobs:
       - name: Deploy to EKS
         id: deploy-eks
         run: |
-          kubectl apply -f ./k8s/ -n ${{ secrets.NAME_SPACE }}
-          kubectl rollout status deployment/app-financial -n ${{ secrets.NAME_SPACE }}
+          chmod +x ./deploy.sh  # Ensure the deploy.sh script is executable
+          ./deploy.sh           # Call your deploy script
         env:
           VERSION_NUMBER: ${{ inputs.VERSION_NUMBER }}
