@@ -6,8 +6,11 @@ on:
       VERSION_NUMBER:
         default: master
         type: string
+      org_name:
+        required: true
+        type: string
     secrets:
-      CI_ACTION_TOKEN:
+      NODE_AUTH_TOKEN:
         required: true
 
 env:
