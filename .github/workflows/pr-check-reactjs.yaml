@@ -35,10 +35,10 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
       - name: Create NPMRC
         run: |
-          echo "@${{ inputs.org_name }}:registry=https://npm.pkg.github.com" >> ~/.npmrc
-          echo "@eagle-projects:registry=https://npm.pkg.github.com" >> ~/.npmrc
-          echo "always-auth=true" >> ~/.npmrc
           echo "//npm.pkg.github.com/:_authToken=${{ secrets.NODE_AUTH_TOKEN }}" >> ~/.npmrc
+          echo "@${{ inputs.org_name }}:registry=https://npm.pkg.github.com" >> ~/.npmrc
+          echo "//npm.pkg.github.com/:_authToken=${{ secrets.NODE_AUTH_TOKEN }}" >> ~/.npmrc
+          echo "@eagle-projects:registry=https://npm.pkg.github.com" >> ~/.npmrc
           echo 'registry "https://registry.yarnpkg.com"' >> ~/.yarnrc
       - name: yarn Install
         run: |
