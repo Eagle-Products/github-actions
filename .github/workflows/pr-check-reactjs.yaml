@@ -18,7 +18,7 @@ env:
 jobs:
   prepr-check:
     runs-on: ubuntu-latest
-    
+
     strategy:
       matrix:
         node-version: [20.x]
@@ -35,9 +35,11 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
       - name: Create NPMRC
         run: |
-            echo "//npm.pkg.github.com/:_authToken=${{ secrets.NODE_AUTH_TOKEN }}" >> ~/.npmrc
-            echo "@${{ inputs.org_name }}:registry=https://npm.pkg.github.com" >> ~/.npmrc
-            echo 'registry "https://registry.yarnpkg.com"' >> ~/.yarnrc
+          echo "@${{ inputs.org_name }}:registry=https://npm.pkg.github.com" >> ~/.npmrc
+          echo "@eagle-projects:registry=https://npm.pkg.github.com" >> ~/.npmrc
+          echo "always-auth=true" >> ~/.npmrc
+          echo "//npm.pkg.github.com/:_authToken=${{ secrets.NODE_AUTH_TOKEN }}" >> ~/.npmrc
+          echo 'registry "https://registry.yarnpkg.com"' >> ~/.yarnrc
       - name: yarn Install
         run: |
           yarn install
@@ -60,7 +62,7 @@ jobs:
         id: check_template_repo
         uses: andstor/file-existence-action@v1
         with:
-          files: ".template_repo"
+          files: '.template_repo'
 
       - uses: actions/setup-node@v2
         with:
@@ -83,7 +85,7 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
         # run: yarn release --create-release github --yes
-  
+
       - name: Extract metadata (tags, labels) for Docker
         id: meta
         uses: docker/metadata-action@v4
@@ -100,11 +102,9 @@ jobs:
           #   # set latest tag for default branch
           #   type=raw,value=latest,enable={{is_default_branch}}
 
-      -
-        name: Set up QEMU
+      - name: Set up QEMU
         uses: docker/setup-qemu-action@v2
-      -
-        name: Set up Docker Buildx
+      - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
 
       - name: Log in to the Container registry
