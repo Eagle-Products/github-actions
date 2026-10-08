@@ -80,7 +80,7 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
       - name: Publish to GitHub Packages - Release
-        if: steps.check_template_repo.outputs.files_exists == 'false' && github.event_name != 'pull_request'
+        if: steps.check_template_repo.outputs.files_exists == 'false' && github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
         run: yarn release --yes
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
