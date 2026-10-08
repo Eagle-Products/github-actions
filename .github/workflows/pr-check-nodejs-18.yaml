@@ -76,7 +76,7 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
       - name: Publish to GitHub Packages - Release
-        if: steps.check_template_repo.outputs.files_exists == 'false' && github.event_name != 'pull_request'
+        if: steps.check_template_repo.outputs.files_exists == 'false' && github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
         run: yarn release --yes
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
@@ -104,7 +104,7 @@ jobs:
             type=ref,event=branch
             type=ref,event=tag
             type=ref,event=pr
-            type=raw,value=${{ inputs.VERSION_NUMBER }} ,enable={{is_default_branch}}
+            type=raw,value=${{ inputs.VERSION_NUMBER }} ,enable=${{ github.ref == 'refs/heads/master' || github.ref == 'refs/heads/master-prod' }}
 
           # tags: |
           #   # set latest tag for default branch
