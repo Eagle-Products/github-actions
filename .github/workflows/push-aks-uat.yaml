@@ -1,10 +1,13 @@
-name: Push To AKS
+
+name: Reusable UAT AKS Deployment
+
 on:
   workflow_call:
     inputs:
       VERSION_NUMBER:
-        default: master
+        required: true
         type: string
+
     secrets:
       AZURE_CREDENTIALS:
         required: true
@@ -14,50 +17,98 @@ on:
         required: true
       name_space:
         required: true
-      deployment_location:
-        required: false
+
+permissions:
+  contents: read
 
 jobs:
   push-aks:
+    name: Deploy App Scheduler to AKS
     runs-on: ubuntu-latest
+
     steps:
-      - uses: azure/login@v1.4.3
-        name: Azure login
-        id: login
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Azure login
+        uses: azure/login@v1.4.3
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
+
       - name: Set AKS context
-        id: set-context
         uses: azure/aks-set-context@v3
         with:
-          resource-group: '${{ secrets.resource_group }}'
-          cluster-name: '${{ secrets.cluster_name }}'
-      - name: Setup kubectl
-        id: install-kubectl
-        uses: azure/setup-kubectl@v3
-      - name: Checkout source code
-        uses: actions/checkout@v3
+          resource-group: ${{ secrets.resource_group }}
+          cluster-name: ${{ secrets.cluster_name }}
 
-      - name: Render Deployment YAML TMP
-        uses: nowactions/envsubst@v1
-        with:
-          input: ./k8s-uat/app-deployment.yaml
-          output: ./app-deployment.yaml.tmp
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: Install envsubst
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gettext-base
+
+      - name: Render UAT Deployment YAML
+        shell: bash
         env:
           VERSION_NUMBER: ${{ inputs.VERSION_NUMBER }}
-      - name: Render Deployment YAML
-        uses: nowactions/envsubst@v1
-        with:
-          input: ./app-deployment.yaml.tmp
-          output: ./k8s-uat/app-deployment.yaml
-        env:
-          VERSION_NUMBER: ${{ inputs.VERSION_NUMBER }}
-      - name: Deploy to AKS
-        id: deploy-aks
+        run: |
+          set -euo pipefail
+
+          mkdir -p rendered
+
+          envsubst '${VERSION_NUMBER}' \
+            < k8s-uat/app-deployment.yaml \
+            > rendered/app-deployment.yaml
+
+          echo "Rendered image:"
+          grep 'image:' rendered/app-deployment.yaml
+
+          if grep -q '${VERSION_NUMBER}' rendered/app-deployment.yaml; then
+            echo "Unresolved image version"
+            exit 1
+          fi
+
+      - name: Validate Deployment manifest
+        run: |
+          kubectl apply --dry-run=server \
+            -n "${{ secrets.name_space }}" \
+            -f rendered/app-deployment.yaml
+
+      - name: Validate Service manifest
+        run: |
+          kubectl apply --dry-run=server \
+            -n "${{ secrets.name_space }}" \
+            -f k8s-uat/app-service.yaml
+
+      - name: Deploy to UAT AKS
         uses: Azure/k8s-deploy@v4
         with:
-          namespace: '${{ secrets.name_space }}'
+          namespace: ${{ secrets.name_space }}
           manifests: |
-            k8s-uat
-        env:
-          VERSION_NUMBER: ${{ inputs.VERSION_NUMBER }}
+            rendered/app-deployment.yaml
+            k8s-uat/app-service.yaml
+          strategy: basic
+
+      - name: Verify Deployment rollout
+        run: |
+          kubectl rollout status deployment/app-scheduler \
+            -n "${{ secrets.name_space }}" \
+            --timeout=300s
+
+      - name: Verify Kubernetes resources
+        run: |
+          kubectl get deployment app-scheduler \
+            -n "${{ secrets.name_space }}"
+
+          kubectl get pods \
+            -n "${{ secrets.name_space }}" \
+            -l app=app-scheduler -o wide
+
+          kubectl get service app-scheduler \
+            -n "${{ secrets.name_space }}"
+
+          kubectl get endpoints app-scheduler \
+            -n "${{ secrets.name_space }}"
+
