@@ -53,6 +53,10 @@ jobs:
       - name: Checkout application repository
         uses: actions/checkout@v4
 
+      # --------------------------------------------------
+      # Step 1: Validate deployment inputs (Diagnostic)
+      # --------------------------------------------------
+
       - name: Validate deployment inputs
         shell: bash
         env:
@@ -68,35 +72,69 @@ jobs:
         run: |
           set -euo pipefail
 
-          test -n "$DEPLOYMENT_NAME"
-          test -n "$VERSION_NUMBER"
-          test -n "$RESOURCE_GROUP"
-          test -n "$CLUSTER_NAME"
-          test -n "$NAMESPACE"
-          test -n "$AZURE_CREDENTIALS"
+          check_required() {
+            local name="$1"
+            local value="$2"
 
-          test -f "$DEPLOYMENT_MANIFEST"
+            if [ -z "$value" ]; then
+              echo "::error::$name is empty or was not passed."
+              exit 1
+            fi
+
+            echo "$name is present."
+          }
+
+          check_file() {
+            local name="$1"
+            local path="$2"
+
+            if [ ! -f "$path" ]; then
+              echo "::error::$name does not exist: $path"
+              exit 1
+            fi
+
+            echo "$name exists: $path"
+          }
+
+          check_required "DEPLOYMENT_NAME" "$DEPLOYMENT_NAME"
+          check_required "VERSION_NUMBER" "$VERSION_NUMBER"
+          check_required "RESOURCE_GROUP" "$RESOURCE_GROUP"
+          check_required "CLUSTER_NAME" "$CLUSTER_NAME"
+          check_required "NAMESPACE" "$NAMESPACE"
+          check_required "AZURE_CREDENTIALS" "$AZURE_CREDENTIALS"
+
+          check_file "Deployment manifest" "$DEPLOYMENT_MANIFEST"
 
           if [ -n "$CONFIG_MANIFEST" ]; then
-            test -f "$CONFIG_MANIFEST"
+            check_file "Config manifest" "$CONFIG_MANIFEST"
+          else
+            echo "No config manifest supplied."
           fi
 
           while IFS= read -r manifest; do
             [ -z "$manifest" ] && continue
-            test -f "$manifest"
+            check_file "Additional manifest" "$manifest"
           done <<< "$ADDITIONAL_MANIFESTS"
 
           if [[ "$VERSION_NUMBER" == *REPLACE* ]]; then
-            echo "::error::Invalid image version"
+            echo "::error::Invalid image version."
             exit 1
           fi
 
-          echo "Deployment inputs validated."
+          echo "All deployment inputs validated."
+
+      # --------------------------------------------------
+      # Step 2: Azure Login
+      # --------------------------------------------------
 
       - name: Azure login
         uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      # --------------------------------------------------
+      # Step 3: Set AKS Context
+      # --------------------------------------------------
 
       - name: Set AKS context
         uses: azure/aks-set-context@v4
@@ -104,13 +142,25 @@ jobs:
           resource-group: ${{ secrets.resource_group }}
           cluster-name: ${{ secrets.cluster_name }}
 
+      # --------------------------------------------------
+      # Step 4: Setup kubectl
+      # --------------------------------------------------
+
       - name: Setup kubectl
         uses: azure/setup-kubectl@v4
+
+      # --------------------------------------------------
+      # Step 5: Install envsubst
+      # --------------------------------------------------
 
       - name: Install envsubst
         run: |
           sudo apt-get update
           sudo apt-get install -y gettext-base
+
+      # --------------------------------------------------
+      # Step 6: Render Deployment Manifest
+      # --------------------------------------------------
 
       - name: Render Deployment manifest
         shell: bash
@@ -133,6 +183,10 @@ jobs:
             echo "::error::Unresolved VERSION_NUMBER placeholder"
             exit 1
           fi
+
+      # --------------------------------------------------
+      # Step 7: Validate Kubernetes Manifests
+      # --------------------------------------------------
 
       - name: Validate Kubernetes manifests
         shell: bash
@@ -161,6 +215,10 @@ jobs:
               -f "$manifest"
           done <<< "$ADDITIONAL_MANIFESTS"
 
+      # --------------------------------------------------
+      # Step 8: Apply Application Configuration
+      # --------------------------------------------------
+
       - name: Apply application configuration
         if: ${{ inputs.config_manifest != '' }}
         shell: bash
@@ -169,7 +227,14 @@ jobs:
           CONFIG_MANIFEST: ${{ inputs.config_manifest }}
         run: |
           set -euo pipefail
-          kubectl apply -n "$NAMESPACE" -f "$CONFIG_MANIFEST"
+
+          kubectl apply \
+            -n "$NAMESPACE" \
+            -f "$CONFIG_MANIFEST"
+
+      # --------------------------------------------------
+      # Step 9: Deploy Application
+      # --------------------------------------------------
 
       - name: Deploy application
         shell: bash
@@ -191,6 +256,10 @@ jobs:
               -f "$manifest"
           done <<< "$ADDITIONAL_MANIFESTS"
 
+      # --------------------------------------------------
+      # Step 10: Verify Deployment Rollout
+      # --------------------------------------------------
+
       - name: Verify Deployment rollout
         shell: bash
         env:
@@ -203,6 +272,10 @@ jobs:
             "deployment/$DEPLOYMENT_NAME" \
             -n "$NAMESPACE" \
             --timeout=300s
+
+      # --------------------------------------------------
+      # Step 11: Verify Kubernetes Resources
+      # --------------------------------------------------
 
       - name: Verify Kubernetes resources
         shell: bash
@@ -226,5 +299,6 @@ jobs:
 
           echo "===== Ingress ====="
           kubectl get ingress -n "$NAMESPACE"
+
 
 
