@@ -15,18 +15,18 @@ on:
         type: string
 
       deployment_manifest:
-        description: "Path to the Deployment manifest"
+        description: "Path to the Kubernetes Deployment manifest"
         required: true
         type: string
 
       config_manifest:
-        description: "Optional ConfigMap and Secret manifest"
+        description: "Optional application ConfigMap/Secret manifest"
         required: false
         type: string
         default: ""
 
       additional_manifests:
-        description: "Additional Service and Ingress manifest paths, one per line"
+        description: "Additional Kubernetes manifest paths, one per line"
         required: false
         type: string
         default: ""
@@ -48,13 +48,18 @@ jobs:
   push-aks:
     name: Deploy Application to UAT AKS
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
+      # --------------------------------------------------
+      # Step 1: Checkout application repository
+      # --------------------------------------------------
+
       - name: Checkout application repository
         uses: actions/checkout@v4
 
       # --------------------------------------------------
-      # Step 1: Validate deployment inputs (Diagnostic)
+      # Step 2: Validate deployment inputs and files
       # --------------------------------------------------
 
       - name: Validate deployment inputs
@@ -76,8 +81,8 @@ jobs:
             local name="$1"
             local value="$2"
 
-            if [ -z "$value" ]; then
-              echo "::error::$name is empty or was not passed."
+            if [[ -z "$value" ]]; then
+              echo "::error::$name is empty or was not passed by the caller workflow."
               exit 1
             fi
 
@@ -88,7 +93,7 @@ jobs:
             local name="$1"
             local path="$2"
 
-            if [ ! -f "$path" ]; then
+            if [[ ! -f "$path" ]]; then
               echo "::error::$name does not exist: $path"
               exit 1
             fi
@@ -105,26 +110,27 @@ jobs:
 
           check_file "Deployment manifest" "$DEPLOYMENT_MANIFEST"
 
-          if [ -n "$CONFIG_MANIFEST" ]; then
-            check_file "Config manifest" "$CONFIG_MANIFEST"
-          else
-            echo "No config manifest supplied."
+          if [[ -n "$CONFIG_MANIFEST" ]]; then
+            check_file "Configuration manifest" "$CONFIG_MANIFEST"
           fi
 
-          while IFS= read -r manifest; do
-            [ -z "$manifest" ] && continue
+          while IFS= read -r manifest || [[ -n "$manifest" ]]; do
+            manifest="${manifest%$'\r'}"
+
+            [[ -z "$manifest" ]] && continue
+
             check_file "Additional manifest" "$manifest"
           done <<< "$ADDITIONAL_MANIFESTS"
 
           if [[ "$VERSION_NUMBER" == *REPLACE* ]]; then
-            echo "::error::Invalid image version."
+            echo "::error::Invalid image version: unresolved placeholder."
             exit 1
           fi
 
           echo "All deployment inputs validated."
 
       # --------------------------------------------------
-      # Step 2: Azure Login
+      # Step 3: Azure Login
       # --------------------------------------------------
 
       - name: Azure login
@@ -133,7 +139,33 @@ jobs:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       # --------------------------------------------------
-      # Step 3: Set AKS Context
+      # Step 4: Verify Azure subscription and AKS access
+      # --------------------------------------------------
+
+      - name: Verify Azure and AKS access
+        shell: bash
+        env:
+          RESOURCE_GROUP: ${{ secrets.resource_group }}
+          CLUSTER_NAME: ${{ secrets.cluster_name }}
+        run: |
+          set -euo pipefail
+
+          echo "Verifying Azure account..."
+
+          az account show \
+            --query "{subscription:name, tenant:tenantId}" \
+            --output table
+
+          echo "Verifying AKS cluster..."
+
+          az aks show \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$CLUSTER_NAME" \
+            --query "{name:name, location:location, provisioningState:provisioningState}" \
+            --output table
+
+      # --------------------------------------------------
+      # Step 5: Set AKS Context
       # --------------------------------------------------
 
       - name: Set AKS context
@@ -143,23 +175,56 @@ jobs:
           cluster-name: ${{ secrets.cluster_name }}
 
       # --------------------------------------------------
-      # Step 4: Setup kubectl
+      # Step 6: Setup kubectl
       # --------------------------------------------------
 
       - name: Setup kubectl
         uses: azure/setup-kubectl@v4
 
       # --------------------------------------------------
-      # Step 5: Install envsubst
+      # Step 7: Verify Kubernetes context and namespace
+      # --------------------------------------------------
+
+      - name: Verify Kubernetes access
+        shell: bash
+        env:
+          NAMESPACE: ${{ secrets.name_space }}
+        run: |
+          set -euo pipefail
+
+          echo "Kubernetes context:"
+          kubectl config current-context
+
+          echo "Kubernetes client version:"
+          kubectl version --client
+
+          echo "Checking namespace..."
+
+          if ! kubectl get namespace "$NAMESPACE" >/dev/null 2>&1; then
+            echo "::error::Namespace '$NAMESPACE' does not exist or is inaccessible."
+            exit 1
+          fi
+
+          echo "Namespace '$NAMESPACE' is accessible."
+
+          kubectl get namespace "$NAMESPACE"
+
+      # --------------------------------------------------
+      # Step 8: Install envsubst
       # --------------------------------------------------
 
       - name: Install envsubst
+        shell: bash
         run: |
+          set -euo pipefail
+
           sudo apt-get update
           sudo apt-get install -y gettext-base
 
+          command -v envsubst
+
       # --------------------------------------------------
-      # Step 6: Render Deployment Manifest
+      # Step 9: Render Deployment manifest
       # --------------------------------------------------
 
       - name: Render Deployment manifest
@@ -176,16 +241,24 @@ jobs:
             < "$DEPLOYMENT_MANIFEST" \
             > rendered/deployment.yaml
 
-          echo "Rendered image:"
-          grep 'image:' rendered/deployment.yaml
+          echo "Rendered container image references:"
+
+          grep -n 'image:' rendered/deployment.yaml
 
           if grep -q '${VERSION_NUMBER}' rendered/deployment.yaml; then
-            echo "::error::Unresolved VERSION_NUMBER placeholder"
+            echo "::error::Unresolved VERSION_NUMBER placeholder."
             exit 1
           fi
 
+          if grep -q 'image:.*REPLACE' rendered/deployment.yaml; then
+            echo "::error::Invalid image placeholder remains in manifest."
+            exit 1
+          fi
+
+          echo "Deployment manifest rendered successfully."
+
       # --------------------------------------------------
-      # Step 7: Validate Kubernetes Manifests
+      # Step 10: Validate Kubernetes manifests
       # --------------------------------------------------
 
       - name: Validate Kubernetes manifests
@@ -197,26 +270,40 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [ -n "$CONFIG_MANIFEST" ]; then
-            kubectl apply --dry-run=server \
+          echo "Validating configuration manifest..."
+
+          if [[ -n "$CONFIG_MANIFEST" ]]; then
+            kubectl apply \
+              --dry-run=server \
               -n "$NAMESPACE" \
               -f "$CONFIG_MANIFEST"
           fi
 
-          kubectl apply --dry-run=server \
+          echo "Validating Deployment manifest..."
+
+          kubectl apply \
+            --dry-run=server \
             -n "$NAMESPACE" \
             -f rendered/deployment.yaml
 
-          while IFS= read -r manifest; do
-            [ -z "$manifest" ] && continue
+          echo "Validating additional manifests..."
 
-            kubectl apply --dry-run=server \
+          while IFS= read -r manifest || [[ -n "$manifest" ]]; do
+            manifest="${manifest%$'\r'}"
+
+            [[ -z "$manifest" ]] && continue
+
+            kubectl apply \
+              --dry-run=server \
               -n "$NAMESPACE" \
               -f "$manifest"
+
           done <<< "$ADDITIONAL_MANIFESTS"
 
+          echo "All Kubernetes manifests passed server-side validation."
+
       # --------------------------------------------------
-      # Step 8: Apply Application Configuration
+      # Step 11: Apply application configuration
       # --------------------------------------------------
 
       - name: Apply application configuration
@@ -228,12 +315,16 @@ jobs:
         run: |
           set -euo pipefail
 
+          echo "Applying application configuration..."
+
           kubectl apply \
             -n "$NAMESPACE" \
             -f "$CONFIG_MANIFEST"
 
+          echo "Application configuration applied."
+
       # --------------------------------------------------
-      # Step 9: Deploy Application
+      # Step 12: Deploy application and additional resources
       # --------------------------------------------------
 
       - name: Deploy application
@@ -244,20 +335,29 @@ jobs:
         run: |
           set -euo pipefail
 
+          echo "Applying Deployment manifest..."
+
           kubectl apply \
             -n "$NAMESPACE" \
             -f rendered/deployment.yaml
 
-          while IFS= read -r manifest; do
-            [ -z "$manifest" ] && continue
+          echo "Applying additional manifests..."
+
+          while IFS= read -r manifest || [[ -n "$manifest" ]]; do
+            manifest="${manifest%$'\r'}"
+
+            [[ -z "$manifest" ]] && continue
 
             kubectl apply \
               -n "$NAMESPACE" \
               -f "$manifest"
+
           done <<< "$ADDITIONAL_MANIFESTS"
 
+          echo "Application resources applied."
+
       # --------------------------------------------------
-      # Step 10: Verify Deployment Rollout
+      # Step 13: Verify Deployment rollout
       # --------------------------------------------------
 
       - name: Verify Deployment rollout
@@ -268,13 +368,54 @@ jobs:
         run: |
           set -euo pipefail
 
+          echo "Waiting for Deployment rollout..."
+
           kubectl rollout status \
             "deployment/$DEPLOYMENT_NAME" \
             -n "$NAMESPACE" \
             --timeout=300s
 
+          echo "Deployment rollout completed successfully."
+
       # --------------------------------------------------
-      # Step 11: Verify Kubernetes Resources
+      # Step 14: Verify Deployment availability
+      # --------------------------------------------------
+
+      - name: Verify Deployment availability
+        shell: bash
+        env:
+          NAMESPACE: ${{ secrets.name_space }}
+          DEPLOYMENT_NAME: ${{ inputs.deployment_name }}
+        run: |
+          set -euo pipefail
+
+          READY_REPLICAS="$(
+            kubectl get deployment "$DEPLOYMENT_NAME" \
+              -n "$NAMESPACE" \
+              -o jsonpath='{.status.readyReplicas}'
+          )"
+
+          DESIRED_REPLICAS="$(
+            kubectl get deployment "$DEPLOYMENT_NAME" \
+              -n "$NAMESPACE" \
+              -o jsonpath='{.spec.replicas}'
+          )"
+
+          READY_REPLICAS="${READY_REPLICAS:-0}"
+          DESIRED_REPLICAS="${DESIRED_REPLICAS:-0}"
+
+          echo "Desired replicas: $DESIRED_REPLICAS"
+          echo "Ready replicas: $READY_REPLICAS"
+
+          if [[ "$DESIRED_REPLICAS" -eq 0 || "$READY_REPLICAS" -lt "$DESIRED_REPLICAS" ]]; then
+            echo "::error::Deployment does not have all desired replicas Ready."
+            exit 1
+          fi
+
+          echo "All desired replicas are Ready."
+
+      # --------------------------------------------------
+      # Step 15: Display Kubernetes resources
       # --------------------------------------------------
 
       - name: Verify Kubernetes resources
@@ -285,20 +426,53 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "===== Deployment ====="
-          kubectl get deployment "$DEPLOYMENT_NAME" -n "$NAMESPACE"
+          echo "======================================"
+          echo "DEPLOYMENT"
+          echo "======================================"
 
-          echo "===== Pods ====="
-          kubectl get pods -n "$NAMESPACE" -o wide
+          kubectl get deployment "$DEPLOYMENT_NAME" \
+            -n "$NAMESPACE" \
+            -o wide
 
-          echo "===== Services ====="
-          kubectl get services -n "$NAMESPACE"
+          echo "======================================"
+          echo "PODS"
+          echo "======================================"
 
-          echo "===== Endpoints ====="
-          kubectl get endpoints -n "$NAMESPACE"
+          kubectl get pods \
+            -n "$NAMESPACE" \
+            -o wide
 
-          echo "===== Ingress ====="
-          kubectl get ingress -n "$NAMESPACE"
+          echo "======================================"
+          echo "SERVICES"
+          echo "======================================"
+
+          kubectl get services \
+            -n "$NAMESPACE"
+
+          echo "======================================"
+          echo "ENDPOINTS"
+          echo "======================================"
+
+          kubectl get endpoints \
+            -n "$NAMESPACE"
+
+          echo "======================================"
+          echo "INGRESS"
+          echo "======================================"
+
+          kubectl get ingress \
+            -n "$NAMESPACE"
+
+          echo "======================================"
+          echo "PERSISTENT VOLUME CLAIMS"
+          echo "======================================"
+
+          kubectl get pvc \
+            -n "$NAMESPACE"
+
+          echo "======================================"
+          echo "DEPLOYMENT VERIFICATION COMPLETE"
+          echo "======================================"
 
 
 
