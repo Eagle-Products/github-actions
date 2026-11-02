@@ -1,36 +1,10 @@
-
-name: Reusable UAT AKS Deployment
-
+name: Push To AKS
 on:
   workflow_call:
     inputs:
       VERSION_NUMBER:
-        description: "Container image version to deploy"
-        required: true
+        default: master
         type: string
-
-      deployment_name:
-        description: "Kubernetes Deployment name"
-        required: true
-        type: string
-
-      deployment_manifest:
-        description: "Path to the Kubernetes Deployment manifest"
-        required: true
-        type: string
-
-      config_manifest:
-        description: "Optional application ConfigMap/Secret manifest"
-        required: false
-        type: string
-        default: ""
-
-      additional_manifests:
-        description: "Additional Kubernetes manifest paths, one per line"
-        required: false
-        type: string
-        default: ""
-
     secrets:
       AZURE_CREDENTIALS:
         required: true
@@ -40,508 +14,53 @@ on:
         required: true
       name_space:
         required: true
-
-permissions:
-  contents: read
+      deployment_location:
+        required: false
 
 jobs:
   push-aks:
-    name: Deploy Application to UAT AKS
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-
     steps:
-      # --------------------------------------------------
-      # Step 1: Checkout application repository
-      # --------------------------------------------------
-
-      - name: Checkout application repository
-        uses: actions/checkout@v4
-
-      # --------------------------------------------------
-      # Step 2: Validate deployment inputs and files
-      # --------------------------------------------------
-
-      - name: Validate deployment inputs
-        shell: bash
-        env:
-          DEPLOYMENT_NAME: ${{ inputs.deployment_name }}
-          DEPLOYMENT_MANIFEST: ${{ inputs.deployment_manifest }}
-          CONFIG_MANIFEST: ${{ inputs.config_manifest }}
-          ADDITIONAL_MANIFESTS: ${{ inputs.additional_manifests }}
-          VERSION_NUMBER: ${{ inputs.VERSION_NUMBER }}
-          RESOURCE_GROUP: ${{ secrets.resource_group }}
-          CLUSTER_NAME: ${{ secrets.cluster_name }}
-          NAMESPACE: ${{ secrets.name_space }}
-          AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
-        run: |
-          set -euo pipefail
-
-          check_required() {
-            local name="$1"
-            local value="$2"
-
-            if [[ -z "$value" ]]; then
-              echo "::error::$name is empty or was not passed."
-              exit 1
-            fi
-
-            echo "$name is present."
-          }
-
-          check_file() {
-            local name="$1"
-            local path="$2"
-
-            if [[ ! -f "$path" ]]; then
-              echo "::error::$name does not exist: $path"
-              exit 1
-            fi
-
-            echo "$name exists: $path"
-          }
-
-          check_required "DEPLOYMENT_NAME" "$DEPLOYMENT_NAME"
-          check_required "VERSION_NUMBER" "$VERSION_NUMBER"
-          check_required "RESOURCE_GROUP" "$RESOURCE_GROUP"
-          check_required "CLUSTER_NAME" "$CLUSTER_NAME"
-          check_required "NAMESPACE" "$NAMESPACE"
-          check_required "AZURE_CREDENTIALS" "$AZURE_CREDENTIALS"
-
-          if [[ "$RESOURCE_GROUP" != "alpha-prep-uat" ]]; then
-            echo "::error::Unexpected UAT resource group."
-            exit 1
-          fi
-
-          if [[ "$CLUSTER_NAME" != "uat-aks" ]]; then
-            echo "::error::Unexpected UAT AKS cluster name."
-            exit 1
-          fi
-
-          if [[ "$NAMESPACE" != "alpha-prep" ]]; then
-            echo "::error::Unexpected UAT namespace."
-            exit 1
-          fi
-
-          check_file "Deployment manifest" "$DEPLOYMENT_MANIFEST"
-
-          if [[ -n "$CONFIG_MANIFEST" ]]; then
-            check_file "Configuration manifest" "$CONFIG_MANIFEST"
-          fi
-
-          while IFS= read -r manifest || [[ -n "$manifest" ]]; do
-            manifest="${manifest%$'\r'}"
-            [[ -z "$manifest" ]] && continue
-            check_file "Additional manifest" "$manifest"
-          done <<< "$ADDITIONAL_MANIFESTS"
-
-          if [[ "$VERSION_NUMBER" == *REPLACE* ]]; then
-            echo "::error::Invalid image version placeholder."
-            exit 1
-          fi
-
-          echo "All deployment inputs validated."
-
-      # --------------------------------------------------
-      # Step 3: Azure Login
-      # --------------------------------------------------
-
-      - name: Azure login
-        uses: azure/login@v2
+      - uses: azure/login@v1.4.3
+        name: Azure login
+        id: login
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-      # --------------------------------------------------
-      # Step 4: Verify Azure subscription and UAT inputs
-      # No az aks show call here.
-      # AKS access is verified in the next step.
-      # --------------------------------------------------
-
-      - name: Verify Azure subscription and AKS inputs
-        shell: bash
-        env:
-          RESOURCE_GROUP: ${{ secrets.resource_group }}
-          CLUSTER_NAME: ${{ secrets.cluster_name }}
-        run: |
-          set -euo pipefail
-
-          EXPECTED_SUBSCRIPTION_ID="d9a3d068-fb9e-48e5-85a3-0c5c2f47ccce"
-
-          echo "Checking Azure login..."
-
-          az account show \
-            --query "{subscriptionId:id, tenantId:tenantId}" \
-            --output table
-
-          ACTUAL_SUBSCRIPTION_ID="$(
-            az account show --query id --output tsv
-          )"
-
-          if [[ "$ACTUAL_SUBSCRIPTION_ID" != "$EXPECTED_SUBSCRIPTION_ID" ]]; then
-            echo "::error::Azure login selected an unexpected subscription."
-            exit 1
-          fi
-
-          echo "Azure subscription verified."
-
-          if [[ "$RESOURCE_GROUP" != "alpha-prep-uat" ]]; then
-            echo "::error::Incorrect AKS resource group."
-            exit 1
-          fi
-
-          if [[ "$CLUSTER_NAME" != "uat-aks" ]]; then
-            echo "::error::Incorrect AKS cluster name."
-            exit 1
-          fi
-
-          echo "UAT AKS resource group and cluster inputs verified."
-
-      # --------------------------------------------------
-      # Step 5: Set AKS Context
-      # This retrieves AKS credentials.
-      # --------------------------------------------------
-
       - name: Set AKS context
-        uses: azure/aks-set-context@v4
+        id: set-context
+        uses: azure/aks-set-context@v3
         with:
-          resource-group: ${{ secrets.resource_group }}
-          cluster-name: ${{ secrets.cluster_name }}
-
-      # --------------------------------------------------
-      # Step 6: Setup kubectl
-      # --------------------------------------------------
-
+          resource-group: '${{ secrets.resource_group }}'
+          cluster-name: '${{ secrets.cluster_name }}'
       - name: Setup kubectl
-        uses: azure/setup-kubectl@v4
+        id: install-kubectl
+        uses: azure/setup-kubectl@v3
+      - name: Checkout source code
+        uses: actions/checkout@v3
 
-      # --------------------------------------------------
-      # Step 7: Verify Kubernetes access and namespace
-      # --------------------------------------------------
-
-      - name: Verify Kubernetes access
-        shell: bash
-        env:
-          NAMESPACE: ${{ secrets.name_space }}
-        run: |
-          set -euo pipefail
-
-          echo "Current Kubernetes context:"
-          kubectl config current-context
-
-          echo "Kubernetes client version:"
-          kubectl version --client
-
-          echo "Checking AKS API connectivity..."
-
-          kubectl cluster-info
-
-          echo "Checking namespace..."
-
-          kubectl get namespace "$NAMESPACE"
-
-          echo "Checking deployment permissions..."
-
-          kubectl auth can-i get deployments \
-            --namespace "$NAMESPACE"
-
-          kubectl auth can-i create deployments \
-            --namespace "$NAMESPACE"
-
-          kubectl auth can-i patch deployments \
-            --namespace "$NAMESPACE"
-
-          echo "Kubernetes access verification completed."
-
-      # --------------------------------------------------
-      # Step 8: Install envsubst
-      # --------------------------------------------------
-
-      - name: Install envsubst
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          sudo apt-get update
-          sudo apt-get install -y gettext-base
-
-          command -v envsubst
-
-      # --------------------------------------------------
-      # Step 9: Render Deployment manifest
-      # Replaces ${VERSION_NUMBER} with the published image tag.
-      # --------------------------------------------------
-
-      - name: Render Deployment manifest
-        shell: bash
+      - name: Render Deployment YAML TMP
+        uses: nowactions/envsubst@v1
+        with:
+          input: ./k8s-uat/app-deployment.yaml
+          output: ./app-deployment.yaml.tmp
         env:
           VERSION_NUMBER: ${{ inputs.VERSION_NUMBER }}
-          DEPLOYMENT_MANIFEST: ${{ inputs.deployment_manifest }}
-        run: |
-          set -euo pipefail
-
-          mkdir -p rendered
-
-          envsubst '${VERSION_NUMBER}' \
-            < "$DEPLOYMENT_MANIFEST" \
-            > rendered/deployment.yaml
-
-          echo "Rendered image references:"
-
-          grep -n 'image:' rendered/deployment.yaml
-
-          if grep -qF '${VERSION_NUMBER}' rendered/deployment.yaml; then
-            echo "::error::Unresolved VERSION_NUMBER placeholder."
-            exit 1
-          fi
-
-          if grep -q 'image:.*REPLACE' rendered/deployment.yaml; then
-            echo "::error::Invalid image placeholder remains."
-            exit 1
-          fi
-
-          echo "Deployment manifest rendered successfully."
-
-      # --------------------------------------------------
-      # Step 10: Server-side validation
-      # No resources are changed by dry-run.
-      # --------------------------------------------------
-
-      - name: Validate Kubernetes manifests
-        shell: bash
+      - name: Render Deployment YAML
+        uses: nowactions/envsubst@v1
+        with:
+          input: ./app-deployment.yaml.tmp
+          output: ./k8s-uat/app-deployment.yaml
         env:
-          NAMESPACE: ${{ secrets.name_space }}
-          CONFIG_MANIFEST: ${{ inputs.config_manifest }}
-          ADDITIONAL_MANIFESTS: ${{ inputs.additional_manifests }}
-        run: |
-          set -euo pipefail
-
-          echo "Validating configuration manifest..."
-
-          if [[ -n "$CONFIG_MANIFEST" ]]; then
-            kubectl apply \
-              --dry-run=server \
-              --namespace "$NAMESPACE" \
-              --filename "$CONFIG_MANIFEST"
-          fi
-
-          echo "Validating Deployment manifest..."
-
-          kubectl apply \
-            --dry-run=server \
-            --namespace "$NAMESPACE" \
-            --filename rendered/deployment.yaml
-
-          echo "Validating additional manifests..."
-
-          while IFS= read -r manifest || [[ -n "$manifest" ]]; do
-            manifest="${manifest%$'\r'}"
-            [[ -z "$manifest" ]] && continue
-
-            kubectl apply \
-              --dry-run=server \
-              --namespace "$NAMESPACE" \
-              --filename "$manifest"
-
-          done <<< "$ADDITIONAL_MANIFESTS"
-
-          echo "All Kubernetes manifests passed server-side validation."
-
-      # --------------------------------------------------
-      # Step 11: Apply application configuration
-      # --------------------------------------------------
-
-      - name: Apply application configuration
-        if: ${{ inputs.config_manifest != '' }}
-        shell: bash
+          VERSION_NUMBER: ${{ inputs.VERSION_NUMBER }}
+      - name: Deploy to AKS
+        id: deploy-aks
+        uses: Azure/k8s-deploy@v4
+        with:
+          namespace: '${{ secrets.name_space }}'
+          manifests: |
+            k8s-uat
         env:
-          NAMESPACE: ${{ secrets.name_space }}
-          CONFIG_MANIFEST: ${{ inputs.config_manifest }}
-        run: |
-          set -euo pipefail
-
-          echo "Applying application configuration..."
-
-          kubectl apply \
-            --namespace "$NAMESPACE" \
-            --filename "$CONFIG_MANIFEST"
-
-          echo "Application configuration applied."
-
-      # --------------------------------------------------
-      # Step 12: Apply Deployment manifest
-      # --------------------------------------------------
-
-      - name: Apply application Deployment
-        shell: bash
-        env:
-          NAMESPACE: ${{ secrets.name_space }}
-        run: |
-          set -euo pipefail
-
-          echo "Applying Deployment manifest..."
-
-          kubectl apply \
-            --namespace "$NAMESPACE" \
-            --filename rendered/deployment.yaml
-
-          echo "Deployment manifest applied."
-
-      # --------------------------------------------------
-      # Step 13: Apply additional resources
-      # Services, Ingresses, and other supplied manifests.
-      # --------------------------------------------------
-
-      - name: Apply additional Kubernetes resources
-        shell: bash
-        env:
-          NAMESPACE: ${{ secrets.name_space }}
-          ADDITIONAL_MANIFESTS: ${{ inputs.additional_manifests }}
-        run: |
-          set -euo pipefail
-
-          while IFS= read -r manifest || [[ -n "$manifest" ]]; do
-            manifest="${manifest%$'\r'}"
-            [[ -z "$manifest" ]] && continue
-
-            echo "Applying: $manifest"
-
-            kubectl apply \
-              --namespace "$NAMESPACE" \
-              --filename "$manifest"
-
-          done <<< "$ADDITIONAL_MANIFESTS"
-
-          echo "Additional Kubernetes resources applied."
-
-      # --------------------------------------------------
-      # Step 14: Verify Deployment rollout
-      # --------------------------------------------------
-
-      - name: Verify Deployment rollout
-        shell: bash
-        env:
-          NAMESPACE: ${{ secrets.name_space }}
-          DEPLOYMENT_NAME: ${{ inputs.deployment_name }}
-        run: |
-          set -euo pipefail
-
-          echo "Waiting for Deployment rollout..."
-
-          kubectl rollout status \
-            "deployment/$DEPLOYMENT_NAME" \
-            --namespace "$NAMESPACE" \
-            --timeout=300s
-
-          echo "Deployment rollout completed successfully."
-
-      # --------------------------------------------------
-      # Step 15: Verify desired and ready replicas
-      # --------------------------------------------------
-
-      - name: Verify Deployment availability
-        shell: bash
-        env:
-          NAMESPACE: ${{ secrets.name_space }}
-          DEPLOYMENT_NAME: ${{ inputs.deployment_name }}
-        run: |
-          set -euo pipefail
-
-          READY_REPLICAS="$(
-            kubectl get deployment "$DEPLOYMENT_NAME" \
-              --namespace "$NAMESPACE" \
-              -o jsonpath='{.status.readyReplicas}'
-          )"
-
-          DESIRED_REPLICAS="$(
-            kubectl get deployment "$DEPLOYMENT_NAME" \
-              --namespace "$NAMESPACE" \
-              -o jsonpath='{.spec.replicas}'
-          )"
-
-          READY_REPLICAS="${READY_REPLICAS:-0}"
-          DESIRED_REPLICAS="${DESIRED_REPLICAS:-0}"
-
-          echo "Desired replicas: $DESIRED_REPLICAS"
-          echo "Ready replicas: $READY_REPLICAS"
-
-          if [[ "$DESIRED_REPLICAS" -eq 0 ]]; then
-            echo "::error::Deployment has zero desired replicas."
-            exit 1
-          fi
-
-          if [[ "$READY_REPLICAS" -lt "$DESIRED_REPLICAS" ]]; then
-            echo "::error::Not all desired replicas are Ready."
-            exit 1
-          fi
-
-          echo "All desired replicas are Ready."
-
-      # --------------------------------------------------
-      # Step 16: Display final Kubernetes resources
-      # --------------------------------------------------
-
-      - name: Verify Kubernetes resources
-        shell: bash
-        env:
-          NAMESPACE: ${{ secrets.name_space }}
-          DEPLOYMENT_NAME: ${{ inputs.deployment_name }}
-        run: |
-          set -euo pipefail
-
-          echo "======================================"
-          echo "DEPLOYMENT"
-          echo "======================================"
-
-          kubectl get deployment "$DEPLOYMENT_NAME" \
-            --namespace "$NAMESPACE" \
-            -o wide
-
-          echo "======================================"
-          echo "PODS"
-          echo "======================================"
-
-          kubectl get pods \
-            --namespace "$NAMESPACE" \
-            -o wide
-
-          echo "======================================"
-          echo "SERVICES"
-          echo "======================================"
-
-          kubectl get services \
-            --namespace "$NAMESPACE"
-
-          echo "======================================"
-          echo "ENDPOINTS"
-          echo "======================================"
-
-          kubectl get endpoints \
-            --namespace "$NAMESPACE"
-
-          echo "======================================"
-          echo "INGRESS"
-          echo "======================================"
-
-          kubectl get ingress \
-            --namespace "$NAMESPACE"
-
-          echo "======================================"
-          echo "CERTIFICATES"
-          echo "======================================"
-
-          kubectl get certificates \
-            --namespace "$NAMESPACE" || true
-
-          echo "======================================"
-          echo "PERSISTENT VOLUME CLAIMS"
-          echo "======================================"
-
-          kubectl get pvc \
-            --namespace "$NAMESPACE"
-
-          echo "======================================"
-          echo "DEPLOYMENT VERIFICATION COMPLETE"
-          echo "======================================"
+          VERSION_NUMBER: ${{ inputs.VERSION_NUMBER }}
 
 
 
