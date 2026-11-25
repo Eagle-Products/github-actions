@@ -1,0 +1,82 @@
+
+name: Push To DEV AKS
+
+on:
+  workflow_call:
+    inputs:
+      VERSION_NUMBER:
+        required: true
+        type: string
+
+    secrets:
+      AZURE_CREDENTIALS:
+        required: true
+      resource_group:
+        required: true
+      cluster_name:
+        required: true
+      name_space:
+        required: true
+
+jobs:
+  push-aks-dev:
+    name: Deploy to DEV AKS
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v3
+
+      - name: Azure login
+        uses: azure/login@v1.4.3
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Set DEV AKS context
+        uses: azure/aks-set-context@v3
+        with:
+          resource-group: ${{ secrets.resource_group }}
+          cluster-name: ${{ secrets.cluster_name }}
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: Verify DEV AKS access
+        run: |
+          echo "Checking Kubernetes connectivity..."
+          kubectl cluster-info
+          kubectl get namespace "${{ secrets.name_space }}"
+
+      - name: Render DEV Deployment YAML TMP
+        uses: nowactions/envsubst@v1
+        with:
+          input: ./k8s/app-deployment.yaml
+          output: ./app-deployment.yaml.tmp
+        env:
+          VERSION_NUMBER: ${{ inputs.VERSION_NUMBER }}
+
+      - name: Render DEV Deployment YAML
+        uses: nowactions/envsubst@v1
+        with:
+          input: ./app-deployment.yaml.tmp
+          output: ./k8s/app-deployment.yaml
+        env:
+          VERSION_NUMBER: ${{ inputs.VERSION_NUMBER }}
+
+      - name: Deploy to DEV AKS
+        id: deploy-aks
+        uses: Azure/k8s-deploy@v4
+        with:
+          namespace: ${{ secrets.name_space }}
+          manifests: |
+            k8s
+
+      - name: Verify DEV deployment resources
+        run: |
+          echo "Checking DEV deployments..."
+          kubectl get deployments -n "${{ secrets.name_space }}"
+          kubectl get pods -n "${{ secrets.name_space }}" -o wide
+
+      - name: Azure logout
+        if: always()
+        run: az logout
