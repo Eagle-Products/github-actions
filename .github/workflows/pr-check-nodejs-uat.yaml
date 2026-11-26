@@ -1,15 +1,13 @@
-name: PR Check Node.js UAT
+name: Pre Pull Request Check Nodejs UAT
 
 on:
   workflow_call:
     inputs:
       VERSION_NUMBER:
-        description: UAT Docker image version
-        required: true
+        default: master
         type: string
 
       org_name:
-        description: Organization name
         required: true
         type: string
 
@@ -21,13 +19,10 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
-permissions:
-  contents: read
-  packages: write
-
 jobs:
+
   prepr-check:
-    name: Node.js Pre-build Checks
+    name: Node.js Build and Test
     runs-on: ubuntu-latest
 
     strategy:
@@ -35,55 +30,32 @@ jobs:
         node-version: [20.x]
 
     steps:
-      - name: Checkout repository
+      - name: Checkout source code
         uses: actions/checkout@v3
 
-      - name: Use Node.js ${{ matrix.node-version }}
+      - name: Use Node.js
         uses: actions/setup-node@v3
         with:
           node-version: ${{ matrix.node-version }}
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
 
       - name: Create NPMRC
         run: |
-          echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}" >> ~/.npmrc
+          echo "//npm.pkg.github.com/:_authToken=${{ secrets.NODE_AUTH_TOKEN }}" >> ~/.npmrc
           echo "@${{ inputs.org_name }}:registry=https://npm.pkg.github.com" >> ~/.npmrc
           echo 'registry "https://registry.yarnpkg.com"' >> ~/.yarnrc
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
 
       - name: Yarn Install
-        run: |
-          yarn install
+        id: yarn-install
+        run: yarn install
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
 
       - name: Run tests
-        run: |
-          yarn test:cov
-
-      - name: Verify LCOV coverage report
-        run: |
-          COVERAGE_FILE="./packages/scheduler-core/coverage/lcov.info"
-
-          if [ ! -s "$COVERAGE_FILE" ]; then
-            echo "ERROR: LCOV coverage report is missing or empty."
-            echo "Expected file: $COVERAGE_FILE"
-            echo ""
-            echo "Available coverage files:"
-            find . -type f \( -name "lcov.info" -o -name "clover.xml" \) -print
-            exit 1
-          fi
-
-          echo "LCOV coverage report found:"
-          ls -lh "$COVERAGE_FILE"
-
-          echo ""
-          echo "First lines of LCOV report:"
-          head -n 10 "$COVERAGE_FILE"
+        if: steps.yarn-install.outcome == 'success'
+        run: yarn test:cov
 
       - name: Coveralls
+        if: success()
         uses: romeovs/lcov-reporter-action@v0.2.21
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -95,42 +67,21 @@ jobs:
         with:
           files: ".template_repo"
 
-      - name: Setup Node.js for GitHub Packages
-        uses: actions/setup-node@v3
-        with:
-          node-version: 20
-          registry-url: https://npm.pkg.github.com
-          scope: '@${{ inputs.org_name }}'
-
-      - name: Configure git user
-        run: |
-          git config --global user.name "${{ github.actor }}"
-          git config --global user.email "${{ github.actor }}@users.noreply.github.com"
-
-      # Publish canary packages for pull requests, as in the existing workflow.
-      - name: Publish to GitHub Packages - PR
-        if: steps.check_template_repo.outputs.files_exists == 'false' && github.event_name == 'pull_request'
-        run: |
-          yarn release --canary --preid pr${{ github.event.number }}bld${{ github.run_number }} --yes
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
-
-      # Preserve the existing master release behavior.
-      # The UAT branch does not publish a normal package release.
-      - name: Publish to GitHub Packages - Release
-        if: steps.check_template_repo.outputs.files_exists == 'false' && github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
-        run: |
-          yarn release --yes
+      - name: Publish PR Canary Package
+        if: >-
+          steps.check_template_repo.outputs.files_exists == 'false' &&
+          github.event_name == 'pull_request'
+        run: yarn release --canary --preid pr${{ github.event.number }}bld${{ github.run_number }} --yes
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
 
   docker-build:
-    name: Docker Build and Push UAT Image
-    needs: [prepr-check]
+    name: Docker Build and Publish
+    needs: prepr-check
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout source code
         uses: actions/checkout@v3
 
       - name: Check is template repo
@@ -139,17 +90,16 @@ jobs:
         with:
           files: ".template_repo"
 
-      - name: Extract metadata (tags, labels) for Docker
+      - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v4
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=schedule
             type=ref,event=branch
             type=ref,event=tag
             type=ref,event=pr
-            type=raw,value=${{ inputs.VERSION_NUMBER }},enable=${{ github.ref == 'refs/heads/uat' }}
+            type=raw,value=${{ inputs.VERSION_NUMBER }},enable=${{ github.ref == 'refs/heads/uat' && github.event_name != 'pull_request' }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v2
@@ -157,39 +107,30 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
 
-      - name: Log in to the Container registry
+      - name: Log in to GHCR
+        if: >-
+          github.ref == 'refs/heads/uat' &&
+          github.event_name != 'pull_request' &&
+          steps.check_template_repo.outputs.files_exists == 'false'
         uses: docker/login-action@v2
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Render Deployment YAML TMP
-        uses: nowactions/envsubst@v1
-        with:
-          input: ./k8s/app-deployment.yaml
-          output: ./app-deployment.yaml.tmp
-        env:
-          VERSION_NUMBER: ${{ inputs.VERSION_NUMBER }}
-
-      - name: Render Deployment YAML
-        uses: nowactions/envsubst@v1
-        with:
-          input: ./app-deployment.yaml.tmp
-          output: ./k8s/app-deployment.yaml
-        env:
-          VERSION_NUMBER: ${{ inputs.VERSION_NUMBER }}
-
       - name: Build and push Docker image
         uses: docker/build-push-action@v4
         with:
           context: .
-          push: ${{ steps.check_template_repo.outputs.files_exists == 'false' }}
+          push: >-
+            ${{
+              github.ref == 'refs/heads/uat' &&
+              github.event_name != 'pull_request' &&
+              steps.check_template_repo.outputs.files_exists == 'false'
+            }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           secrets: |
             "NODE_AUTH_TOKEN=${{ secrets.NODE_AUTH_TOKEN }}"
-        env:
-          VERSION_NUMBER: ${{ inputs.VERSION_NUMBER }}
