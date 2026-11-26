@@ -1,5 +1,4 @@
 name: Pre Pull Request Check Nodejs
-
 on:
   workflow_call:
     inputs:
@@ -12,7 +11,7 @@ on:
     secrets:
       NODE_AUTH_TOKEN:
         required: true
-
+          
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
@@ -20,38 +19,35 @@ env:
 jobs:
   prepr-check:
     runs-on: ubuntu-latest
-
+    
     strategy:
       matrix:
         node-version: [24.x]
+        # See supported Node.js release schedule at https://nodejs.org/en/about/releases/
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
+      - uses: actions/checkout@v3
       - name: Use Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v3
         with:
           node-version: ${{ matrix.node-version }}
-
+          # registry-url: "https://npm.pkg.github.com"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
       - name: Create NPMRC
         run: |
-          echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}" >> ~/.npmrc
-          echo "@${ORG_NAME}:registry=https://npm.pkg.github.com" >> ~/.npmrc
-          echo 'registry "https://registry.yarnpkg.com"' >> ~/.yarnrc
+            echo "//npm.pkg.github.com/:_authToken=${{ secrets.NODE_AUTH_TOKEN }}" >> ~/.npmrc
+            echo "@${{ inputs.org_name }}:registry=https://npm.pkg.github.com" >> ~/.npmrc
+            echo 'registry "https://registry.yarnpkg.com"' >> ~/.yarnrc
+      - name: yarn Install
+        run: |
+          yarn install
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
-          ORG_NAME: ${{ inputs.org_name }}
-
-      - name: Yarn Install
-        run: yarn install --frozen-lockfile
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
-
       - name: Run tests
         if: always()
-        run: yarn test:cov
-
+        run: |
+          yarn test:cov
       - name: Coveralls
         uses: romeovs/lcov-reporter-action@v0.2.21
         with:
@@ -64,41 +60,35 @@ jobs:
         with:
           files: ".template_repo"
 
-      - name: Configure Node.js for GitHub Packages
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v3
         with:
-          node-version: 24.x
+          node-version: ${{ matrix.node-version }}
           registry-url: 'https://npm.pkg.github.com'
+          # Defaults to the user or organization that owns the workflow file
           scope: '@${{ inputs.org_name }}'
-
       - name: Configure git user
         run: |
-          git config --global user.name "${GITHUB_ACTOR}"
-          git config --global user.email "${GITHUB_ACTOR}@users.noreply.github.com"
-
+          git config --global user.name "${{ github.actor }}"
+          git config --global user.email "${{ github.actor }}@users.noreply.github.com"
       # Publish to GitHub Packages
-
       - name: Publish to GitHub Packages - PR
         if: steps.check_template_repo.outputs.files_exists == 'false' && github.event_name == 'pull_request'
         run: yarn release --canary --preid pr${{ github.event.number }}bld${{ github.run_number }} --yes
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
-
       - name: Publish to GitHub Packages - Release
         if: steps.check_template_repo.outputs.files_exists == 'false' && github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
         run: yarn release --yes
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
-
+        # run: yarn release --create-release github --yes
+          
   docker-build:
     name: Docker Build
-    needs: [prepr-check]
+    needs: [ prepr-check ]
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
+      - uses: actions/checkout@v3
       - name: Check is template repo
         id: check_template_repo
         uses: andstor/file-existence-action@v1
@@ -107,7 +97,7 @@ jobs:
 
       - name: Extract metadata (tags, labels) for Docker
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v4
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
@@ -115,16 +105,21 @@ jobs:
             type=ref,event=branch
             type=ref,event=tag
             type=ref,event=pr
-            type=raw,value=${{ inputs.VERSION_NUMBER }},enable=${{ github.ref == 'refs/heads/master' || github.ref == 'refs/heads/master-prod' }}
+            type=raw,value=${{ inputs.VERSION_NUMBER }} ,enable=${{ github.ref == 'refs/heads/master' || github.ref == 'refs/heads/master-prod' }}
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+          # tags: |
+          #   # set latest tag for default branch
+          #   type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      -
+        name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+      -
+        name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
 
       - name: Log in to the Container registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v2
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -137,7 +132,6 @@ jobs:
           output: ./app-deployment.yaml.tmp
         env:
           VERSION_NUMBER: ${{ inputs.VERSION_NUMBER }}
-
       - name: Render Deployment YAML
         uses: nowactions/envsubst@v1
         with:
@@ -147,7 +141,7 @@ jobs:
           VERSION_NUMBER: ${{ inputs.VERSION_NUMBER }}
 
       - name: Build and push Docker image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v4
         with:
           context: .
           push: ${{ steps.check_template_repo.outputs.files_exists == 'false' }}
@@ -156,6 +150,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           secrets: |
-            NODE_AUTH_TOKEN=${{ secrets.NODE_AUTH_TOKEN }}
+            "NODE_AUTH_TOKEN=${{ secrets.NODE_AUTH_TOKEN }}"
         env:
           VERSION_NUMBER: ${{ inputs.VERSION_NUMBER }}
+    
