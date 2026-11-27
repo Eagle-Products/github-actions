@@ -28,35 +28,103 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+
   prepr-check:
     name: Node.js 24 Build and Test
     runs-on: ubuntu-latest
 
     steps:
+
+      # 1. Checkout application source code
       - name: Checkout source code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
+      # 2. Validate release channel, branch and Docker image version
+      - name: Validate release channel and version
+        env:
+          RELEASE_CHANNEL: ${{ inputs.release_channel }}
+          VERSION_NUMBER: ${{ inputs.VERSION_NUMBER }}
+          BRANCH_NAME: ${{ github.ref_name }}
+        run: |
+          set -e
+
+          case "$RELEASE_CHANNEL" in
+            dev)
+              if [[ "$BRANCH_NAME" != "dev" ]]; then
+                echo "ERROR: DEV builds must run from dev branch."
+                exit 1
+              fi
+
+              if [[ ! "$VERSION_NUMBER" =~ ^V1\.dev\.[0-9]+$ ]]; then
+                echo "ERROR: Expected DEV version format V1.dev.N"
+                exit 1
+              fi
+              ;;
+
+            uat)
+              if [[ "$BRANCH_NAME" != "master" ]]; then
+                echo "ERROR: UAT builds must run from master branch."
+                exit 1
+              fi
+
+              if [[ ! "$VERSION_NUMBER" =~ ^V1\.uat\.[0-9]+$ ]]; then
+                echo "ERROR: Expected UAT version format V1.uat.N"
+                exit 1
+              fi
+              ;;
+
+            prod)
+              if [[ ! "$BRANCH_NAME" =~ ^prod- ]]; then
+                echo "ERROR: PROD builds must run from a prod-* branch."
+                exit 1
+              fi
+
+              if [[ ! "$VERSION_NUMBER" =~ ^[0-9]{4}-[0-9]{2}\.[0-9]{2}$ ]]; then
+                echo "ERROR: Expected PROD version format YYYY-MM.NN"
+                exit 1
+              fi
+              ;;
+
+            *)
+              echo "ERROR: Invalid release channel: $RELEASE_CHANNEL"
+              exit 1
+              ;;
+          esac
+
+          echo "Release channel: $RELEASE_CHANNEL"
+          echo "Branch: $BRANCH_NAME"
+          echo "Docker image version: $VERSION_NUMBER"
+
+      # 3. Configure Node.js 24
       - name: Use Node.js 24
         uses: actions/setup-node@v4
         with:
           node-version: 24
 
+      # 4. Configure GitHub Packages authentication
       - name: Create NPMRC
         run: |
-          echo "//npm.pkg.github.com/:_authToken=${{ secrets.NODE_AUTH_TOKEN }}" >> ~/.npmrc
+          echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}" >> ~/.npmrc
           echo "@${{ inputs.org_name }}:registry=https://npm.pkg.github.com" >> ~/.npmrc
           echo 'registry "https://registry.yarnpkg.com"' >> ~/.yarnrc
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
 
+      # 5. Install application dependencies
       - name: Yarn Install
         run: yarn install
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
 
+      # 6. Run application tests and generate coverage
       - name: Run tests
         run: yarn test:cov
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
 
+      # 7. Publish test coverage report
       - name: Coveralls
         if: success()
         uses: romeovs/lcov-reporter-action@v0.2.21
@@ -64,42 +132,14 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           lcov-file: ./packages/scheduler-core/coverage/lcov.info
 
+      # 8. Check whether this is a template repository
       - name: Check is template repo
         id: check_template_repo
         uses: andstor/file-existence-action@v1
         with:
           files: ".template_repo"
 
-      - name: Configure Node.js for GitHub Packages
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          registry-url: "https://npm.pkg.github.com"
-          scope: "@${{ inputs.org_name }}"
-
-      - name: Configure git user
-        run: |
-          git config --global user.name "${{ github.actor }}"
-          git config --global user.email "${{ github.actor }}@users.noreply.github.com"
-
-      - name: Publish DEV package release
-        if: >-
-          inputs.release_channel == 'dev' &&
-          github.ref == 'refs/heads/dev' &&
-          github.event_name == 'push' &&
-          steps.check_template_repo.outputs.files_exists == 'false'
-        run: yarn release --yes
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
-
-      - name: Publish PR Canary Package
-        if: >-
-          github.event_name == 'pull_request' &&
-          steps.check_template_repo.outputs.files_exists == 'false'
-        run: yarn release --canary --preid pr${{ github.event.number }}bld${{ github.run_number }} --yes
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
-
+  # Docker image build and publication
   docker-build:
     name: Docker Build and Publish
     needs:
@@ -107,15 +147,19 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
+      # 1. Checkout application source code
       - name: Checkout source code
         uses: actions/checkout@v4
 
+      # 2. Check whether this is a template repository
       - name: Check is template repo
         id: check_template_repo
         uses: andstor/file-existence-action@v1
         with:
           files: ".template_repo"
 
+      # 3. Generate Docker image tags and labels
       - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -128,12 +172,15 @@ jobs:
             type=raw,value=${{ inputs.VERSION_NUMBER }}
             type=sha,prefix=sha-
 
+      # 4. Configure QEMU
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
+      # 5. Configure Docker Buildx
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # 6. Authenticate with GitHub Container Registry
       - name: Log in to GHCR
         if: >-
           github.event_name != 'pull_request' &&
@@ -144,6 +191,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # 7. Render Kubernetes deployment YAML temporary file
       - name: Render Deployment YAML TMP
         uses: nowactions/envsubst@v1
         with:
@@ -152,6 +200,7 @@ jobs:
         env:
           VERSION_NUMBER: ${{ inputs.VERSION_NUMBER }}
 
+      # 8. Render Kubernetes deployment YAML
       - name: Render Deployment YAML
         uses: nowactions/envsubst@v1
         with:
@@ -160,15 +209,12 @@ jobs:
         env:
           VERSION_NUMBER: ${{ inputs.VERSION_NUMBER }}
 
+      # 9. Build and publish Docker image
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: >-
-            ${{
-              github.event_name != 'pull_request' &&
-              steps.check_template_repo.outputs.files_exists == 'false'
-            }}
+          push: ${{ github.event_name != 'pull_request' && steps.check_template_repo.outputs.files_exists == 'false' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
